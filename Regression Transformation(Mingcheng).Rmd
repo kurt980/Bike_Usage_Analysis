@@ -1,0 +1,194 @@
+---
+title: 'Linear Regression Approach'
+date: "May. 1, 2023"
+output:
+  pdf_document: default
+  html_document: default
+---
+# install and load packages
+```{r}
+#install.packages("lars")
+#install.packages("ggplot2")
+#install.packages("Amelia")
+#install.packages("caTools")
+#install.packages("caret")
+#install.packages("forecast")
+#install.packages("agricolae")
+#install.packages("Metrics")
+library(data.table)
+library(readr)
+library(tidyverse)
+library(Amelia)
+library(caTools)
+library(corrplot)
+library(caret)
+library(forecast)
+library(ggplot2)
+library(agricolae)
+library(faraway)
+library(MASS)
+library(lars)
+library(caret)
+library(Metrics)
+```
+
+## Import dataset
+
+```{r}
+bike <-read_csv("C:\\Users\\willifornia\\Documents\\R_stat429\\Group4BikeDataAutumn_Revised.csv")
+
+```
+
+## Factorize non-numerical variables
+```{r}
+
+bike$Holiday <- as.factor(bike$Holiday)
+bike$Weekday <- as.factor(bike$Weekday)
+summary(bike)
+```
+
+## Produce correlation matrix
+
+```{r}
+num.col <- sapply(bike, is.numeric)
+cor <- cor(bike[,num.col])
+corrplot(cor, addCoef.col =1, tl.cex = 1, cl.cex = 1)
+
+```
+## Bike vs. Hours & Temp
+```{r}
+ggplot(bike, aes(Hour, Bike))+
+  geom_point(position = position_jitter(w=1,h=0), aes(color = Temperature), size = 3)+
+  scale_color_gradientn(colours = c('darkblue', 'lightblue','yellow', 'darkorange', 'darkred')) +
+  theme(panel.background = element_rect(fill = "light grey"),
+        axis.title = element_text(size = 20))
+```
+
+## Bike vs. Humidity
+```{r}
+ggplot(bike, aes(Humidity, Bike)) +
+  geom_point(aes(col = Humidity), alpha = 0.5,size=3) +
+  scale_y_continuous(n.breaks = 10) +
+  scale_color_gradientn(colours = c('red', 'purple', 'blue', 'darkblue')) +
+  theme(panel.background = element_rect(fill = "gray90"),
+        axis.title = element_text(size = 20))
+```
+## Bike vs. Windspeed
+```{r}
+ggplot(bike, aes(Wind_Speed,Bike))+
+  geom_point(aes(col = Wind_Speed), alpha = 0.5,size=3)+
+  scale_y_continuous(n.breaks =10)+
+  scale_color_gradientn(colours = c('blue', 'darkblue', 'purple','red'))+
+  theme(panel.background = element_rect(fill = "gray90"),
+        axis.title = element_text(size = 20))
+```
+## Bike vs. Visibility
+```{r}
+ggplot(bike, aes(Visibility,Bike))+
+  geom_point(aes(col = Visibility), alpha = 0.5,size=3)+
+  scale_y_continuous(n.breaks =10)+
+  scale_color_gradientn(colours = c('red', 'pink','purple', 'blue', 'darkblue'))+
+  theme(panel.background = element_rect(fill = "gray90"),
+        axis.title = element_text(size = 20))
+```
+## Bike vs.Weekday
+```{r}
+ggplot(bike, aes(x = Weekday, y = Bike, fill = Weekday)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Weekday", y = "Sum of bikes", title = "Sum of bikes by weekday") +
+  scale_fill_manual(values = c("Monday" = "red", "Tuesday" = "orange", "Wednesday" = "yellow", "Thursday" = "green", "Friday" = "blue", "Saturday" = "brown", "Sunday" = "violet"))
+```
+## Weekday Difference
+```{r}
+mean_bikes <- aggregate(Bike ~ Weekday, data = bike, FUN = mean)
+ggplot(mean_bikes, aes(x = Weekday, y = Bike)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Weekday", y = "Average number of bikes rented")
+```
+
+### Linear Regression Analysis
+## Remove "Functioning_Day" column
+```{r}
+bike <- subset(bike,select=-c(Functioning_Day))
+```
+
+## Split data into train and test set (75% train, 25% test)
+```{r}
+set.seed(123)
+train_idx<-createDataPartition(bike$Bike,p=0.75,list=FALSE)
+traindata <-bike[train_idx,]
+testdata <-bike[-train_idx,]
+```
+## Examine the collinearity presented in the regression model
+```{r}
+bikemod_vif <-lm(Bike~.-Date,data=traindata)
+vif(bikemod_vif)
+```
+## Remove Dew_point_temperature to address collinearity problem
+
+```{r}
+bikemod_simple <- lm(Bike~.-Date-Dew_point_temperature,data=traindata)
+summary(bikemod_simple)
+vif(bikemod_simple) #VIF are good after removing Dew_point_temperature
+```
+## Accuracy of the linear regression model
+```{r}
+predss <- predict(bikemod_simple,newdata = testdata)
+print(mae(predss,testdata$Bike)) #Calculate MAE
+```
+## produce diagnostic plots for the linear regression model
+par(mfrow=c(2,2))
+plot(bikemod_simple,add.smooth = FALSE) 
+
+
+## Use Box-Cox function to find optimal power transformation for response variable
+```{r}
+bc<-boxcox(bikemod_simple)
+(lambda_trans <- bc$x[which.max(bc$y)]) #Choose 0.5 as our power transformation for bike usage
+bikemod_boxcox<-lm(Bike^0.5~.-Date-Dew_point_temperature,data=bike)
+summary(bikemod_boxcox)
+par(mfrow=c(2,2))
+plot(bikemod_boxcox,add.smooth = FALSE) 
+```
+
+## An illustration for adding polynomial terms of the Hour variable (power of 8)
+```{r}
+ggplot(traindata, aes(Hour, Bike^0.5))+
+  geom_point(position = position_jitter(w=1,h=0), aes(color = Temperature),size=3)+
+  scale_color_gradientn(colours = c('darkblue', 'lightblue','yellow', 'darkorange', 'darkred'))+
+  stat_smooth(formula = y~poly(x,8, raw = TRUE), lty = 'dotted')+
+  theme(panel.background = element_rect(fill = "gray90"),
+        axis.title = element_text(size = 20))
+```
+## Add polynomial and interaction terms in the model
+```{r}
+bikemod_transform <-lm(Bike^0.5~.-Date-Dew_point_temperature+
+                         poly(Hour,8,raw=T)+poly(Humidity,4,raw=T)+
+                         Humidity*Temperature+
+                         Solar_Radiation*Humidity+
+                         Solar_Radiation*Temperature,data=traindata)
+par(mfrow=c(2,2))
+plot(bikemod_transform,add.smooth = FALSE)
+summary(bikemod_transform)
+```
+
+
+## plot histogram for residuals distribution
+```{r}
+ggplot(bikemod_transform,aes(bikemod_transform$residuals))+
+  geom_histogram()
+```
+
+## Prediction accuracy
+```{r}
+pred <- predict(bikemod_transform,newdata = testdata)
+predictions <- pred^2
+#MAE of the transformed regression model
+print(mae(predictions,testdata$Bike)) 
+
+#Plot predicted value vs. true values
+par(mfrow=c(1,1))
+plot(testdata$Bike,predictions,xlab=("True Bike Count"),ylab=("Predicted value"))
+abline(1,1,col="red")
+```
+
